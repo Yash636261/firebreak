@@ -44,7 +44,14 @@ const rollback = /^rollback: (.*)$/m.exec(snapOut)?.[1] ?? "(see snapshot)";
 const snapshot = /^saved (.*)$/m.exec(snapOut)?.[1] ?? null;
 
 const gapMs = new Date(sus.at) - new Date(top.changedAt);
-const when = gapMs >= 0 ? `${ago(gapMs)} before the incident` : `${ago(gapMs)} after the incident began`;
+// Flagsmith's clock and the app's clock differ by up to a second or two, so a
+// change a few seconds "after" the first error is really simultaneous.
+const when =
+  gapMs >= 0
+    ? `${ago(gapMs)} before the first errors`
+    : gapMs > -60_000
+      ? "at the same moment as the first errors"
+      : `${ago(gapMs)} after the incident began`;
 const code = top.stackRefs.length ? `read at ${top.stackRefs[0]}, which is in the stack trace` : top.refs ? `read in ${top.refs} place(s) in code, none in the stack trace` : "not found in code";
 const evidence = `${top.log} at ${top.changedAt.slice(11, 16)}Z by ${top.by}, ${when}; ${code}`;
 const others = sus.suspects.slice(1).map((s) => `${s.feature} ${s.score}`).join(", ");

@@ -1,0 +1,14 @@
+{
+  "name": "firebreak-bot",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node --env-file-if-exists=.env src/index.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@slack/bolt": "^5.1.0"
+  }
+}

@@ -9,7 +9,7 @@ Built for Toggle Wars, the Flagsmith hackathon. Tracks: **02 AI Agents and Featu
 | Path | What it is | Track |
 |---|---|---|
 | [`skills/flagsmith-firefighter/`](skills/flagsmith-firefighter/SKILL.md) | Agent Skill: symptom → suspect flag → snapshot → approved kill → verify → incident issue, all through the Flagsmith CLI | 04 |
-| `bot/` *(next)* | Alert webhook → runs the skill headless → Slack Approve / Reject → executes and reports | 02 |
+| [`bot/`](bot/) | Alert webhook → runs the skill headless (read-only) → Slack Approve / Reject (or a local board) → runs it again, allowed to touch only the approved flag → reports in thread | 02 |
 | [`demo-app/`](demo-app/) | Tiny shop with a `new_checkout` flag whose "on" path has a planted bug, a traffic script, and an error-spike alert | demo |
 
 ## A real run (Flagsmith Cloud, free plan)
@@ -63,6 +63,31 @@ Claude Code, as a plugin:
 /plugin install firebreak@firebreak
 ```
 Or for one session from a clone: `claude --plugin-dir path/to/firebreak`. Any other Agent Skills host: copy `skills/flagsmith-firefighter/` into its skills folder.
+
+## The bot (Track 02)
+
+```
+demo shop ──alert──▶ bot ──plan call (read-only tools)──▶ Claude Code + skill ──▶ FIREBREAK PLAN
+                      │                                                               │
+                      ◀───────────── Slack message with Approve / Reject ◀────────────┘
+                      │ human clicks Approve (with a confirm dialog)
+                      └──execute call (only `flagsmith flag disable <that flag>` allowed)──▶ kill → verify → trail ──▶ thread reply
+```
+
+```bash
+cd bot && npm install && cp .env.example .env   # fill in Slack tokens (optional)
+npm start                                       # board on http://127.0.0.1:4100, alerts on POST /alert
+cd ../demo-app && ALERT_WEBHOOK_URL=http://127.0.0.1:4100/alert npm start
+```
+
+Slack app: create it from [`bot/slack-manifest.yml`](bot/slack-manifest.yml) (Socket Mode, so no public URL), install it, invite `@firebreak` to the channel. Without Slack tokens the bot uses the local board for approvals.
+
+Guard rails in the bot, on top of the skill's own:
+- The plan call is given only read tools. The execute call is given exactly one write permission, scoped to the approved verb and flag (`Bash(flagsmith flag disable new_checkout:*)`), so the model cannot touch any other flag even if it tried.
+- Actions with `--enable`, delete/archive, or shell control characters are refused before the agent runs.
+- Approve has a Slack confirm dialog, optional approver allow-list (`SLACK_APPROVERS`), and double clicks are ignored. Alerts for an already-open incident are de-duplicated.
+
+Measured on the demo incident with `FIREBREAK_MODEL=sonnet`: plan **8 turns · 35 s · $0.36**, approved kill + verify + trail **10 turns · 55 s · $0.39**. About **$0.75 and 90 seconds** per incident, against minutes of digging through change history by hand.
 
 ## Headless (how the bot uses it)
 
