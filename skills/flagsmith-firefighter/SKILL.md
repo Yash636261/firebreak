@@ -37,6 +37,8 @@ node scripts/suspects.mjs --at "<ISO start time>" --window 120 --stack .firebrea
 
 Omit `--stack` if there is none. Output: up to 3 ranked flags with when each changed, by whom, whether it is ON now, and whether a file that reads it is in the stack trace. Score = 60% time proximity + 35% "read by a file in the stack" + 5% "used in code"; halved if the flag is already off.
 
+Changes come from the audit log when the plan has one; otherwise (Flagsmith free plan, where the audit log is empty) from each feature state's `updated_at`, with the author taken from the latest published feature version. The header line says which source was used.
+
 For the top suspect only, if you need more certainty, look at the code that reads it:
 `git grep -n "<feature>"` then read only the lines around the hit in a stack-trace file.
 
@@ -73,6 +75,8 @@ If running headless (env `FIREBREAK_MODE=plan`), print the plan block as above a
 ## Step 4: Act (only after "yes")
 
 Run the exact proposed command plus `--yes --no-input`. In headless mode, only act if `FIREBREAK_APPROVED` equals the suspect feature name.
+
+The CLI itself refuses state changes without `--yes` when it cannot prompt ("pass --yes to confirm …"). That refusal is a second guard, not an error to work around before approval.
 
 ## Step 5: Verify
 

@@ -58,6 +58,28 @@ for (const r of audit.results ?? []) {
   byFeature.set(f, cur);
 }
 
+// Fallback for plans without an audit log (it is empty on Flagsmith's free
+// plan): every environment feature state carries `updated_at`. Identity
+// overrides are skipped; segment overrides are kept and labelled.
+let source = "audit log";
+if (byFeature.size === 0) {
+  source = "feature states";
+  const names = new Map(fsJson(["feature", "list", "-p", String(ctx.projectId)]).map((f) => [f.id, f.name]));
+  const states = fsJson(["api", `api/v1/environments/${ctx.envKey}/featurestates/?page_size=500`]);
+  for (const fs of states.results ?? []) {
+    if (fs.identity) continue;
+    const t = new Date(fs.updated_at).getTime();
+    if (t < from || t > until) continue;
+    const f = names.get(fs.feature);
+    if (!f) continue;
+    const what = `${fs.feature_segment ? `segment override ${fs.feature_segment}` : "environment default"} now ${fs.enabled ? "ON" : "off"}`;
+    const cur = byFeature.get(f) ?? { feature: f, featureId: fs.feature, changes: 0, last: null };
+    cur.changes++;
+    if (!cur.last || t > cur.last.t) cur.last = { t, log: what, by: null };
+    byFeature.set(f, cur);
+  }
+}
+
 if (byFeature.size === 0) {
   const msg = `no flag changes in ${ctx.envName} between ${hhmm(from)} and ${hhmm(until)}. A flag is unlikely to be the cause; widen --window or check deploys.`;
   if (a.json) process.stdout.write(`${JSON.stringify({ env: ctx.envName, suspects: [], note: msg })}\n`);
@@ -71,9 +93,18 @@ const stackFiles = [...stack.matchAll(/([\w./\\@-]+\.(?:[cm]?[jt]sx?|py|go|rb|ja
 const inStack = (file) => stackFiles.some((s) => s.endsWith(file) || file.endsWith(s) || s.split("/").pop() === file.split("/").pop());
 
 for (const s of byFeature.values()) {
-  const g = run("git", ["grep", "-n", "-I", "-F", "--", s.feature], { cwd: repo });
+  // --untracked: also search files not committed yet (still honours .gitignore)
+  const g = run("git", ["grep", "-n", "-I", "-F", "--untracked", "--", s.feature], { cwd: repo });
+  // Lines where the key is a string literal (the actual flag read) rank before comments.
+  const quoted = new RegExp(`["']${s.feature.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["']`);
   s.refs = g.code === 0
-    ? g.out.trim().split("\n").filter((l) => !l.startsWith(".firebreak/")).slice(0, 20).map((l) => l.split(":").slice(0, 2).join(":"))
+    ? g.out
+        .trim()
+        .split(/\r?\n/)
+        .filter((l) => !l.startsWith(".firebreak/") && !/(^|\/)(README|SKILL)\.md:/i.test(l))
+        .sort((x, y) => Number(quoted.test(y)) - Number(quoted.test(x)))
+        .slice(0, 20)
+        .map((l) => l.split(":").slice(0, 2).join(":"))
     : [];
   s.stackRefs = s.refs.filter((r) => inStack(r.split(":")[0]));
   const gap = at.getTime() - s.last.t;
@@ -95,13 +126,30 @@ for (const s of ranked) {
     s.enabled = null;
   }
   if (s.enabled === false) s.score *= 0.5; // already off: less likely to still be hurting
+  // Free-plan path has no author: the latest live version says who published it.
+  if (!s.last.by && s.featureId) {
+    const v = run("flagsmith", ["api", `api/v1/environments/${ctx.envId}/features/${s.featureId}/versions/?page_size=1`, "--json", "--no-input"]);
+    try {
+      s.publishedBy = JSON.parse(v.out).results?.[0]?.published_by ?? null;
+    } catch {}
+  }
 }
+const ids = [...new Set(ranked.map((s) => s.publishedBy).filter(Boolean))];
+if (ids.length && ctx.orgId) {
+  const u = run("flagsmith", ["api", `api/v1/organisations/${ctx.orgId}/users/`, "--json", "--no-input"]);
+  try {
+    const users = new Map(JSON.parse(u.out).map((x) => [x.id, x.email]));
+    for (const s of ranked) if (s.publishedBy) s.last.by = users.get(s.publishedBy) ?? `user ${s.publishedBy}`;
+  } catch {}
+}
+for (const s of ranked) s.last.by ??= "unknown";
 ranked.sort((x, y) => y.score - x.score);
 
 if (a.json) {
   process.stdout.write(
     `${JSON.stringify({
       env: ctx.envName,
+      source,
       envKey: ctx.envKey,
       projectId: ctx.projectId,
       at: at.toISOString(),
@@ -122,7 +170,7 @@ if (a.json) {
   process.exit(0);
 }
 
-const lines = [`env ${ctx.envName} · incident ${hhmm(at)} · flag changes since ${hhmm(from)}: ${byFeature.size}`];
+const lines = [`env ${ctx.envName} · incident ${hhmm(at)} · flag changes since ${hhmm(from)}: ${byFeature.size} (from ${source})`];
 ranked.forEach((s, i) => {
   const when = s.gapMs >= 0 ? `${ago(s.gapMs)} before` : `${ago(s.gapMs)} after`;
   const state = s.enabled === true ? "ON" : s.enabled === false ? "off" : "?";

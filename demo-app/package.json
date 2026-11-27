@@ -1,0 +1,12 @@
+{
+  "name": "firebreak-demo-app",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.mjs",
+    "traffic": "node src/traffic.mjs"
+  },
+  "dependencies": {
+    "flagsmith-nodejs": "^8.1.2"
+  }
+}

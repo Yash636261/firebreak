@@ -68,9 +68,9 @@ export function context(overrides = {}) {
   const envKey = overrides.env ?? cfg.environment?.value;
   if (!project) die("no project: run `flagsmith init` or pass --project");
   if (!envKey) die("no environment: run `flagsmith init` or pass --env <client-side key>");
-  const p = /^\d+$/.test(String(project)) ? { id: Number(project) } : fsJson(["project", "get", String(project)]);
-  const e = fsJson(["environment", "get", String(envKey)]);
-  return { projectId: p.id, envKey: e.api_key ?? envKey, envId: e.id, envName: e.name ?? String(envKey) };
+  const p = fsJson(["project", "get", String(project)]);
+  const e = fsJson(["environment", "get", String(envKey), "-p", String(p.id)]);
+  return { projectId: p.id, orgId: p.organisation, envKey: e.api_key ?? envKey, envId: e.id, envName: e.name ?? String(envKey) };
 }
 
 /** Flags passed to every state-changing or env-scoped CLI call. */
@@ -85,6 +85,7 @@ export function stateDir(repo = process.cwd()) {
 /** "14:02" in local time, or "3m" style durations. */
 export const hhmm = (d) => new Date(d).toTimeString().slice(0, 5);
 export const ago = (ms) => {
+  if (Math.abs(ms) < 60_000) return `${Math.round(Math.abs(ms) / 1000)}s`;
   const m = Math.round(Math.abs(ms) / 60000);
   return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h${String(m % 60).padStart(2, "0")}`;
 };

@@ -10,19 +10,45 @@ Built for Toggle Wars, the Flagsmith hackathon. Tracks: **02 AI Agents and Featu
 |---|---|---|
 | [`skills/flagsmith-firefighter/`](skills/flagsmith-firefighter/SKILL.md) | Agent Skill: symptom → suspect flag → snapshot → approved kill → verify → incident issue, all through the Flagsmith CLI | 04 |
 | `bot/` *(next)* | Alert webhook → runs the skill headless → Slack Approve / Reject → executes and reports | 02 |
-| `demo-app/` *(next)* | Tiny shop with a `new_checkout` flag whose "on" path has a planted bug, plus a traffic script | demo |
+| [`demo-app/`](demo-app/) | Tiny shop with a `new_checkout` flag whose "on" path has a planted bug, a traffic script, and an error-spike alert | demo |
 
-## The skill in one run
+## A real run (Flagsmith Cloud, free plan)
+
+Flag off → 0% errors. Someone turns `new_checkout` on → ~30% of checkouts throw. The shop raises an alert with the stack trace. Then:
 
 ```
-$ node scripts/suspects.mjs --stack .firebreak/stack.txt
-env Production · incident 09:48 · flag changes since 07:48: 2
-1. new_checkout  score 0.98  now ON  changed 09:44 (4m before) by alice@shop.dev  IN STACK src/checkout.ts:1
-2. dark_mode     score 0.40  now ON  changed 08:58 (50m before) by bob@shop.dev   1 refs e.g. src/theme.ts:1
+$ node scripts/suspects.mjs --at 2026-11-27T04:42:09Z --stack demo-app/logs/last-error.txt
+env Production · incident 10:12 · flag changes since 08:12: 1 (from feature states)
+1. new_checkout  score 1.00  now ON  changed 10:12 (3s before) by <author>  IN STACK demo-app/src/checkout.mjs:5
+   "environment default now ON"
 next: node scripts/snapshot.mjs new_checkout
+
+$ node scripts/snapshot.mjs new_checkout
+snapshot new_checkout @ Production: ON
+rollback: flagsmith flag update new_checkout -p 56714 -e <envKey> --enable --yes
+
+FIREBREAK PLAN … Approve? yes
+
+$ flagsmith flag disable new_checkout -p 56714 -e <envKey> --yes --no-input
+$ node scripts/verify.mjs new_checkout
+VERIFIED new_checkout resolves OFF in Production (0s, reason STATIC)
 ```
 
-Then: `snapshot.mjs` (saves state + prints rollback) → **FIREBREAK PLAN, human approves** → `flagsmith flag disable … --yes --no-input` → `verify.mjs` (`flagsmith eval --test`) → `trail.mjs` (`gh issue create` + flag description note).
+Traffic right after: **0% errors**. `trail.mjs` then writes the incident issue body and prints the `gh issue create` and flag-annotation commands.
+
+## Run the demo yourself
+
+```bash
+npm install -g @flagsmith/cli && flagsmith login
+flagsmith init                      # at the repo root: pick your project + Production
+# create a boolean feature `new_checkout`, off in Production
+cd demo-app && npm install
+npm start                           # shop on :4000
+npm run traffic                     # 4 req/s of simulated shoppers
+flagsmith flag enable new_checkout --yes   # the "bad deploy": errors start, alert fires
+```
+
+Then ask your agent: *"Checkout is throwing 500s, use the flagsmith-firefighter skill"* (stack trace is in `demo-app/logs/last-error.txt`).
 
 ## Install the skill
 
@@ -35,7 +61,8 @@ npm install -g @flagsmith/cli && flagsmith init
 
 ## Safety
 
-- Read-only until approval. `allowed-tools` pre-approves only read commands, so the agent host also asks before any `flag disable`.
+- Read-only until approval. `allowed-tools` pre-approves only read commands, so the agent host also asks before any `flag disable`. And the Flagsmith CLI itself refuses non-interactive changes without `--yes`, which the skill only passes after a human says yes.
+- Works on every Flagsmith plan: uses the audit log when it exists, and falls back to feature-state timestamps + feature versions on the free plan (where the audit log is empty).
 - One change per approval, only in the incident's environment, only reversible operations (no deletes, no archive).
 - Snapshot before every change; the rollback command is printed and written into the issue.
 - Weak evidence (no flag changed in the window, or top score < 0.5) → the skill recommends *not* killing anything.
@@ -51,7 +78,7 @@ Each script prints ≤ 8 lines. The CLI is called with `--json` and filtered in-
 |---|---|
 | T4 Completes the whole job | Symptom → suspect → snapshot → approved kill → SDK-side verify → issue + flag annotation |
 | T4 Token efficiency | See above; measured count recorded for the demo run |
-| T4 Creative CLI use | `flagsmith api` (audit log) + `flag get/disable/update --weight` + `eval --test` chained with `git grep` and `gh` |
+| T4 Creative CLI use | `flagsmith api` (audit log, or feature states + versions + org users on free plans) + `flag get/disable/update --weight` + `eval` chained with `git grep` and `gh` |
 | T4 Safety around production | Snapshot, single-env scope, approval gate, reversible-only, "don't kill on weak evidence" |
 | T2 Uses CLI / API / MCP | The bot drives the same skill through the CLI |
 | T2 Saves real time | Minutes of audit-log archaeology → one ranked answer in seconds |
