@@ -1,0 +1,4 @@
+node_modules/
+.firebreak/
+.env
+.env.local
