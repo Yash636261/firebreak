@@ -1,0 +1,14 @@
+{
+  "name": "firebreak",
+  "description": "Firebreak: Flagsmith incident-response skills for coding agents.",
+  "owner": {
+    "name": "Yash Suthar"
+  },
+  "plugins": [
+    {
+      "name": "firebreak",
+      "source": "./",
+      "description": "Put out production fires caused by Flagsmith feature flags: find the flag, kill it after human approval, verify, leave a trail."
+    }
+  ]
+}

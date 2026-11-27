@@ -27,50 +27,28 @@ All scripts live in `scripts/` next to this file. Run them from the root of the 
 
 ## Step 1: Get the symptom
 
-You need: what broke (error message, failing route, or stack trace) and roughly when it started. If the user gave a stack trace, save it to `.firebreak/stack.txt`. If they gave no time, use now.
+You need: what broke (error message, failing route, or stack trace) and roughly when it started. If the stack trace is already in a file, pass that path; if it was pasted, save it to `.firebreak/stack.txt`. If they gave no time, use now.
 
-## Step 2: Find suspects
-
-```bash
-node scripts/suspects.mjs --at "<ISO start time>" --window 120 --stack .firebreak/stack.txt
-```
-
-Omit `--stack` if there is none. Output: up to 3 ranked flags with when each changed, by whom, whether it is ON now, and whether a file that reads it is in the stack trace. Score = 60% time proximity + 35% "read by a file in the stack" + 5% "used in code"; halved if the flag is already off.
-
-Changes come from the audit log when the plan has one; otherwise (Flagsmith free plan, where the audit log is empty) from each feature state's `updated_at`, with the author taken from the latest published feature version. The header line says which source was used.
-
-For the top suspect only, if you need more certainty, look at the code that reads it:
-`git grep -n "<feature>"` then read only the lines around the hit in a stack-trace file.
-
-## Step 3: Snapshot and propose
+## Steps 2–3: Find the suspect, snapshot it, build the plan (one call)
 
 ```bash
-node scripts/snapshot.mjs <feature>
+node scripts/plan.mjs --at "<ISO start time>" --stack <stack trace file>
 ```
 
-Then pick the **smallest** action that matches what changed (the audit log line tells you):
+Omit `--stack` if there is none. This ranks suspects, snapshots the top one and prints a finished **FIREBREAK PLAN** block (or a **NO FLAG EXPLAINS THIS INCIDENT** block: then go to "When it is not a flag"). Do not re-run the pieces it already ran.
 
-| Audit log says | Action |
-|---|---|
-| A multivariate weight changed (rollout %) | `flagsmith flag update <f> --weight <control>=100 --weight <variant>=0` |
-| A segment override changed | `flagsmith flag disable <f> --segment <segment>` |
-| Flag state updated / enabled | `flagsmith flag disable <f>` |
+How it decides, so you can explain it:
+- Score = 60% time proximity + 35% "read by a file in the stack trace" + 5% "used in code"; halved if the flag is already off. Below 0.5 it refuses to propose a kill.
+- Changes come from the audit log when the Flagsmith plan has one; otherwise (free plan, where the audit log is empty) from each feature state's `updated_at`, with the author from the latest published feature version.
+- Smallest blast radius: a segment-override change is killed for that segment only. If the change was a **multivariate weight** (rollout %), replace the action with `flagsmith flag update <f> --weight <control>=100 --weight <variant>=0 -p … -e …`.
 
-Always append the scope from the snapshot: `-p <projectId> -e <envKey>`.
+Optional, at most one extra call: if the plan's `evidence` line names a file in the stack, read ~10 lines around it to explain the mechanism in one sentence.
 
-Present the plan in exactly this shape and **stop**:
+Show the plan block to the human exactly as printed and **stop** until they answer.
 
-```
-FIREBREAK PLAN
-suspect:  <feature>  (score 0.xx)
-evidence: <one line: changed HH:MM by X, N min before errors; read in file:line which is in the stack>
-action:   <exact command, without --yes>
-rollback: <rollback line from snapshot.mjs>
-env:      <env name>
-Approve? (yes / no)
-```
+If running headless (env `FIREBREAK_MODE=plan`), print the plan block and exit. Do not wait, do not run the action. The caller collects approval and re-invokes you with `FIREBREAK_APPROVED=<feature>`.
 
-If running headless (env `FIREBREAK_MODE=plan`), print the plan block as above and exit. Do not wait, do not run the action. The caller collects approval and re-invokes you with `FIREBREAK_APPROVED=<feature>`.
+Manual route (only if `plan.mjs` fails): `scripts/suspects.mjs` (ranking, same flags) then `scripts/snapshot.mjs <feature>`, and write the block yourself in the same shape.
 
 ## Step 4: Act (only after "yes")
 

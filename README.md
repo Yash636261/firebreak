@@ -53,11 +53,30 @@ Then ask your agent: *"Checkout is throwing 500s, use the flagsmith-firefighter 
 ## Install the skill
 
 ```bash
-# Claude Code
-cp -r skills/flagsmith-firefighter ~/.claude/skills/
 # prerequisites
-npm install -g @flagsmith/cli && flagsmith init
+npm install -g @flagsmith/cli && flagsmith login && flagsmith init
 ```
+
+Claude Code, as a plugin:
+```
+/plugin marketplace add Yash636261/firebreak
+/plugin install firebreak@firebreak
+```
+Or for one session from a clone: `claude --plugin-dir path/to/firebreak`. Any other Agent Skills host: copy `skills/flagsmith-firefighter/` into its skills folder.
+
+## Headless (how the bot uses it)
+
+```bash
+# 1. investigate only: prints the FIREBREAK PLAN, changes nothing
+FIREBREAK_MODE=plan claude -p "Checkout 500s since <time>, stack in <file>. Use the flagsmith-firefighter skill." \
+  --plugin-dir . --output-format json --allowedTools Skill Read "Bash(node:*)" "Bash(git grep:*)"
+
+# 2. after a human approves: kill + verify + trail
+FIREBREAK_APPROVED=new_checkout claude -p "... approved killing new_checkout in Production." \
+  --plugin-dir . --output-format json --allowedTools Skill Read "Bash(node:*)" "Bash(flagsmith flag disable:*)" "Bash(flagsmith eval:*)"
+```
+
+`flag disable` is only in the allowed tools of the second call, so the first call cannot change Flagsmith even if the model tried.
 
 ## Safety
 
@@ -69,8 +88,17 @@ npm install -g @flagsmith/cli && flagsmith init
 
 ## Token efficiency
 
-Each script prints ≤ 8 lines. The CLI is called with `--json` and filtered in-script, never dumped to the model. The audit log is fetched once and only the top 3 suspects get a `flag get`.
-*(Token count for the demo run: TODO)*
+Each script prints ≤ 9 lines. The CLI is called with `--json` and filtered in-script, never dumped to the model. The change history is fetched once and only the top 3 suspects get a `flag get`. `plan.mjs` does ranking + snapshot + plan in a single tool call.
+
+Measured on the demo incident (Claude Code headless, default model, Flagsmith Cloud free plan):
+
+| Run | Turns | Time | Output tokens | Cache reads | Cost |
+|---|---|---|---|---|---|
+| Plan only, v1 (separate scripts) | 12 | 55 s | 3,256 | 465k | $0.92 |
+| **Plan only, v2 (`plan.mjs`)** | **7** | **30 s** | **1,462** | **265k** | $0.85 |
+| Approved: kill + verify + trail | 10 | 58 s | 2,918 | 509k | $0.64 |
+
+The skill's own footprint (SKILL.md + every script output) is ~3k tokens per run; the rest is the agent host's baseline context re-read each turn, which is why cutting turns matters more than cutting output.
 
 ## How it meets the judging criteria
 
