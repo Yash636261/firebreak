@@ -31,3 +31,16 @@ async function flags() {
 export async function isEnabled(feature) {
   return (await flags()).isFeatureEnabled(feature);
 }
+
+// Per-user evaluation, so a multivariate experiment splits users between variants.
+const IDENTITY_TTL_MS = 10_000;
+const byUser = new Map(); // userId -> { at, flags }
+
+export async function valueFor(feature, userId) {
+  let hit = byUser.get(userId);
+  if (!hit || Date.now() - hit.at > IDENTITY_TTL_MS) {
+    hit = { at: Date.now(), flags: await client.getIdentityFlags(userId) };
+    byUser.set(userId, hit);
+  }
+  return hit.flags.isFeatureEnabled(feature) ? hit.flags.getFeatureValue(feature) : null;
+}

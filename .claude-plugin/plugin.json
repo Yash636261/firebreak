@@ -1,7 +1,7 @@
 {
   "name": "firebreak",
   "description": "Put out production fires caused by Flagsmith feature flags: find the flag, kill it after human approval, verify, leave a trail.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": { "name": "Yash Suthar" },
   "repository": "https://github.com/Yash636261/firebreak",
   "license": "MIT"

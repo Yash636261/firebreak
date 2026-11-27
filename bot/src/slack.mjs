@@ -37,7 +37,10 @@ export async function startSlack({ botToken, appToken, channel, approvers }) {
       b.push({ type: "section", text: { type: "mrkdwn", text: `*Evidence*\n${p.evidence}` } });
       if (p.mechanism) b.push({ type: "section", text: { type: "mrkdwn", text: `*Why*\n${p.mechanism}` } });
       if (p.decision === "kill") {
-        b.push({ type: "section", text: { type: "mrkdwn", text: `*Proposed action*\n\`\`\`${p.action}\`\`\`\n*Rollback*\n\`\`\`${p.rollback}\`\`\`` } });
+        b.push({
+          type: "section",
+          text: { type: "mrkdwn", text: `*Proposed action*${p.effect ? `: ${p.effect}` : ""}\n\`\`\`${p.action}\`\`\`\n*Rollback*\n\`\`\`${p.rollback}\`\`\`` },
+        });
       }
     }
     if (i.status === "awaiting_approval") {
@@ -47,13 +50,13 @@ export async function startSlack({ botToken, appToken, channel, approvers }) {
           {
             type: "button",
             style: "danger",
-            text: { type: "plain_text", text: `Approve: kill ${p.feature}` },
+            text: { type: "plain_text", text: /--weight/.test(p.action) ? `Approve: ${p.feature} back to control` : `Approve: kill ${p.feature}` },
             action_id: "fb_approve",
             value: i.id,
             confirm: {
-              title: { type: "plain_text", text: "Kill this flag?" },
+              title: { type: "plain_text", text: /--weight/.test(p.action) ? "Roll back this experiment?" : "Kill this flag?" },
               text: { type: "mrkdwn", text: `This runs \`${p.action}\` in *${p.env}*.` },
-              confirm: { type: "plain_text", text: "Kill it" },
+              confirm: { type: "plain_text", text: "Do it" },
               deny: { type: "plain_text", text: "Cancel" },
             },
           },
@@ -72,8 +75,8 @@ export async function startSlack({ botToken, appToken, channel, approvers }) {
     planned: () => "⏸️ Waiting for a human. Nothing has been changed in Flagsmith.",
     no_flag: () => "✅ No flag explains this incident. Nothing changed; check recent deploys.",
     plan_failed: (i) => `⚠️ Investigation failed: ${i.error}`,
-    approved: (i) => `▶️ Approved by ${i.approvedBy}. Killing the flag, then verifying…`,
-    resolved: (i) => `✅ Resolved: flag killed and verified off. Approved by ${i.approvedBy}.`,
+    approved: (i) => `▶️ Approved by ${i.approvedBy}. Applying the approved action, then verifying…`,
+    resolved: (i) => `✅ Resolved: approved action applied and verified with the SDK. Approved by ${i.approvedBy}.`,
     exec_failed: (i) => `⚠️ Execution failed after approval by ${i.approvedBy}: ${i.error ?? i.result?.summary ?? ""}`,
     rejected: (i) => `✋ Rejected by ${i.rejectedBy}. Nothing was changed.`,
   };

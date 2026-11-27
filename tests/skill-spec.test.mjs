@@ -31,10 +31,12 @@ function frontmatter(src) {
 }
 
 for (const name of readdirSync(DIR)) {
-  test(`skill ${name} follows the Agent Skills spec`, () => {
+  test(`skill ${name} can be loaded by any Agent Skills host`, () => {
+    // Given
     const src = readFileSync(new URL(`${name}/SKILL.md`, DIR), "utf8");
+    // When
     const { fm, body } = frontmatter(src);
-
+    // Then
     assert.match(fm.name, /^[a-z0-9]+(-[a-z0-9]+)*$/, "name: lowercase letters, digits, single hyphens");
     assert.ok(fm.name.length <= 64, "name: max 64 chars");
     assert.equal(fm.name, name, "name must match the directory");

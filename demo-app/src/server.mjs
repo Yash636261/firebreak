@@ -66,7 +66,8 @@ createServer(async (req, res) => {
     let raw = "";
     for await (const chunk of req) raw += chunk;
     try {
-      const result = await checkout(JSON.parse(raw));
+      const cart = JSON.parse(raw);
+      const result = await checkout(cart, cart.user);
       record(true);
       return json(res, 200, result);
     } catch (err) {

@@ -1,11 +1,11 @@
 ---
 name: flagsmith-firefighter
-description: Put out a production fire caused by a feature flag. Traces a broken feature or error spike to the Flagsmith flag that most likely caused it, snapshots its state, turns it off after a human approves, verifies the kill the way an SDK sees it, and leaves an incident issue with a one-line rollback. Use when something broke in production, errors spiked after a rollout, a user reports a feature misbehaving, or someone asks "which flag broke this" or "kill the flag".
+description: Put out a production fire caused by a feature flag or experiment. Traces a broken feature or error spike to the Flagsmith flag that most likely caused it, snapshots its state, and after a human approves either turns it off or rolls a running experiment back to control; verifies the fix the way an SDK sees it, and leaves an incident issue with a one-line rollback. Use when something broke in production, errors spiked after a rollout or an A/B test launch, a user reports a feature misbehaving, or someone asks "which flag broke this", "kill the flag" or "stop the experiment".
 license: MIT
 compatibility: Requires the Flagsmith CLI v2 (`flagsmith`) logged in or FLAGSMITH_API_KEY set, Node 18+, git, and optionally the GitHub CLI (`gh`) for the incident issue.
 metadata:
   author: firebreak
-  version: "0.1.0"
+  version: "0.2.0"
 allowed-tools: Bash(node:*) Bash(flagsmith flag get:*) Bash(flagsmith eval:*) Bash(flagsmith config:*) Bash(git grep:*) Bash(git log:*)
 ---
 
@@ -39,8 +39,11 @@ Omit `--stack` if there is none. This ranks suspects, snapshots the top one and 
 
 How it decides, so you can explain it:
 - Score = 60% time proximity + 35% "read by a file in the stack trace" + 5% "used in code"; halved if the flag is already off. Below 0.5 it refuses to propose a kill.
-- Changes come from the audit log when the Flagsmith plan has one; otherwise (free plan, where the audit log is empty) from each feature state's `updated_at`, with the author from the latest published feature version.
-- Smallest blast radius: a segment-override change is killed for that segment only. If the change was a **multivariate weight** (rollout %), replace the action with `flagsmith flag update <f> --weight <control>=100 --weight <variant>=0 -p … -e …`.
+- Changes come from the audit log, which is a paid-plan feature; on the free plan (audit log empty) they come from each feature state's `updated_at`, with the author from the latest published feature version.
+- Smallest blast radius, chosen for you (the `effect:` line says which):
+  - a **running experiment** (multivariate flag with traffic on a variant) is rolled back to control with `flag update <f> --weight <variant>=0`: everyone gets the control value, the flag stays on, and the rollback restores the split;
+  - a segment-override change is disabled for that segment only;
+  - anything else is disabled.
 
 Optional, at most one extra call: if the plan's `evidence` line names a file in the stack, read ~10 lines around it to explain the mechanism in one sentence.
 
@@ -59,13 +62,11 @@ The CLI itself refuses state changes without `--yes` when it cannot prompt ("pas
 ## Step 5: Verify
 
 ```bash
-node scripts/verify.mjs <feature>            # environment default
+node scripts/verify.mjs <feature>                                 # works for both kinds of kill
 node scripts/verify.mjs <feature> --identity <affected user id>   # if you know one
 ```
 
-`VERIFIED` means an SDK now resolves the flag off. `NOT VERIFIED` means an override is still on: report it, do not keep changing things without another approval.
-
-For a weight change, verify with `flagsmith eval <f> -e <envKey> --identity <id> --jq .value` instead and check it returns the control value.
+`VERIFIED` means an SDK now sees the fix: the flag resolves off, or (experiment rollback) 5 sample users all get the control value. `NOT VERIFIED` means an override is still on: report it, do not keep changing things without another approval.
 
 ## Step 6: Leave a trail
 

@@ -15,9 +15,20 @@ Feature flags are the fastest kill switch a team has, but only if you know *whic
 Firebreak does the digging, and leaves the decision with a human:
 
 1. **Finds the suspect.** Ranks flags that changed shortly before the errors, boosted when a file that reads the flag is in the stack trace.
-2. **Proposes the smallest fix.** Snapshots the flag and writes a plan with the evidence, the exact command and the rollback.
+2. **Proposes the smallest fix.** A broken **A/B test variant** is rolled back to control (the flag and the experiment stay on); a broken release is turned off; a segment override is turned off for that segment only. Snapshots the flag and writes a plan with the evidence, the exact command and the rollback.
 3. **Waits for a yes.** Nothing changes in Flagsmith until a person approves.
-4. **Kills, verifies, records.** Turns the flag off, checks an SDK now sees it off, and writes the incident record with the rollback.
+4. **Fixes, verifies, records.** Applies the change, checks an SDK now sees it (flag off, or sample users all on control), and writes the incident record with the rollback.
+
+### What the agent decides alone, and where it stops for a person
+
+| The agent does on its own | A person decides |
+|---|---|
+| Read change history, code and the stack trace | Whether to change anything in Flagsmith at all |
+| Rank suspects and explain the mechanism | Approve or reject the one proposed change |
+| Pick the smallest fix (control rollback / segment / disable) | Anything beyond that one change (a second suspect needs a second yes) |
+| Snapshot state, write the rollback command | When to roll back, once the bug is fixed |
+| Verify the fix through an SDK, write the incident record | Publishing: GitHub issue and flag annotation are offered, not done |
+| **Refuse** when evidence is weak (score < 0.5): "no flag explains this" | |
 
 ## What's in the repo
 
@@ -52,6 +63,24 @@ VERIFIED new_checkout resolves OFF in Production (0s, reason STATIC)
 ```
 
 Traffic right after: **0% errors**. `trail.mjs` writes the incident record (symptom, evidence, action, verification, rollback, follow-ups).
+
+### And when it's an A/B test
+
+The demo shop also runs an experiment, `checkout_layout`: control `classic` vs variant `express`. Launch it at 50% and guest shoppers on `express` crash. Firebreak doesn't kill the experiment's flag; it sends everyone back to control and keeps the split in the rollback:
+
+```
+FIREBREAK PLAN
+suspect:  checkout_layout  (score 1.00)
+evidence: environment default now ON, experiment sending 50% of users to variants at 06:33Z by <author>, 5s before the first errors; read at demo-app/src/checkout.mjs:8, which is in the stack trace
+effect:   roll the experiment back to control: everyone gets "classic"; the flag stays on
+action:   flagsmith flag update checkout_layout --weight express=0 -p 56714 -e <envKey>
+rollback: flagsmith flag update checkout_layout -p 56714 -e <envKey> --enable --weight express=50 --yes
+others:   new_checkout 0.35
+
+VERIFIED checkout_layout all 5 sample users get control "classic" (live variants: 0) in Production (1s)
+```
+
+Once the variant is fixed, the rollback line relaunches the experiment exactly as it was.
 
 ## Install the skill
 
@@ -91,18 +120,29 @@ Slack app: create it from [`bot/slack-manifest.yml`](bot/slack-manifest.yml) (So
 - Actions that enable a flag, delete or archive anything, or contain shell control characters are refused before the agent runs.
 - Approve has a Slack confirm dialog and an optional approver allow-list (`SLACK_APPROVERS`); double clicks are ignored; alerts for an open incident are de-duplicated.
 
-**Cost**, measured on the demo incident with `FIREBREAK_MODEL=sonnet`: plan **8 turns · 35 s · $0.36**, approved kill + verify + record **10 turns · 55 s · $0.39**. About **$0.75 and 90 seconds** per incident.
+**Cost**, measured with `FIREBREAK_MODEL=sonnet`:
+
+| Incident | Plan (read-only) | Approved fix + verify + record |
+|---|---|---|
+| Broken release (`new_checkout` → disable) | 8 turns · 35 s · $0.36 | 10 turns · 55 s · $0.39 |
+| Broken A/B variant (`checkout_layout` → control) | 10 turns · 57 s · $0.40 | 8 turns · 43 s · $0.37 |
+
+About **$0.75 and 90 seconds** per incident.
 
 ## Run the whole demo
 
 ```bash
 npm install -g @flagsmith/cli && flagsmith login
 flagsmith init                               # at the repo root: your project + Production
-# in Flagsmith: create a boolean feature `new_checkout`, off in Production
+flagsmith feature create new_checkout --yes                                   # boolean, off
+flagsmith feature create checkout_layout --value classic --yes                # experiment: control "classic"
+flagsmith feature variant add checkout_layout --key express --value express --weight 0 --yes
 (cd bot && npm install && npm start)         # terminal 1
 (cd demo-app && npm install && ALERT_WEBHOOK_URL=http://127.0.0.1:4100/alert npm start)   # terminal 2
 (cd demo-app && npm run traffic)             # terminal 3: simulated shoppers
-flagsmith flag enable new_checkout --yes     # the bad release: errors start, the alert fires
+flagsmith flag enable new_checkout --yes     # scenario 1, bad release: errors start, the alert fires
+# or
+flagsmith flag update checkout_layout --enable --weight express=50 --yes     # scenario 2, bad A/B variant
 ```
 
 Open http://127.0.0.1:4100 (or Slack), read the plan, click **Approve**.
@@ -113,7 +153,7 @@ Open http://127.0.0.1:4100 (or Slack), read the plan, click **Approve**.
 - **One change per approval**, only in the incident's environment, only reversible operations (no deletes, no archive).
 - **Snapshot before every change**; the rollback command is printed and written into the record.
 - **Weak evidence → no kill.** If no flag changed in the window, or the best score is below 0.5, it says "no flag explains this incident" and recommends changing nothing. A wrong kill is a second incident.
-- **Works on every Flagsmith plan.** It uses the audit log when there is one, and falls back to feature-state timestamps + feature versions on the free plan, where the audit log is empty.
+- **Works on every Flagsmith plan.** The audit log is a paid-plan feature; when it is empty (free plan) Firebreak falls back to feature-state timestamps + feature versions.
 
 ## Token efficiency
 
@@ -148,16 +188,16 @@ FIREBREAK_APPROVED=new_checkout claude -p "... approved killing new_checkout in 
 npm test
 ```
 
-19 tests, no Flagsmith account needed: the skill against the Agent Skills spec; the bot's write-permission guard (kills allowed, enable/delete/archive/chained commands refused); and suspect ranking + plan decisions on both the audit-log and free-plan paths against a fake `flagsmith` CLI. CI runs them on Linux and Windows.
+20 tests, no Flagsmith account needed: the skill against the Agent Skills spec; the bot's write-permission guard (kills and control rollbacks allowed, enable/delete/archive/chained commands refused); and suspect ranking + plan decisions (disable, experiment back to control, refuse on weak evidence) on both the audit-log and free-plan paths against a fake `flagsmith` CLI. Tests follow Flagsmith's own conventions (`# Given / # When / # Then`, product-readable names). CI runs them on Linux and Windows.
 
 ## How it meets the judging criteria
 
 | Criterion | How |
 |---|---|
-| **T4** Completes the whole job | Symptom → suspect → snapshot → approved kill → SDK-side verify → incident record + rollback |
+| **T4** Completes the whole job | Symptom → suspect → snapshot → approved fix (disable, or A/B test back to control) → SDK-side verify → incident record + rollback |
 | **T4** Token efficiency | One-call `plan.mjs`, ≤ 9-line script outputs, measured per run (table above) |
 | **T4** Creative CLI use | `flagsmith api` (audit log, or feature states + versions + org users on free plans), `flag get/disable/update --weight`, `eval`, chained with `git grep` and `gh` |
-| **T4** Safety around production | Snapshot, single-env scope, approval gate, reversible-only, "don't kill on weak evidence" |
+| **T4** Safety around production | Snapshot, single-env scope, approval gate, reversible-only, smallest blast radius (experiments keep running on control), "don't kill on weak evidence" |
 | **T2** Uses CLI / API / MCP | The bot drives the skill, which drives the Flagsmith CLI and API |
 | **T2** Saves real time | Change-history digging + code search → a ranked answer with evidence in ~35 s |
 | **T2** Human approves changes | Slack Approve (with confirm) is the only path to a change, and that change is permission-scoped to one flag |

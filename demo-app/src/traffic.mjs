@@ -17,7 +17,11 @@ const products = [
 ];
 const cart = () => {
   const lines = products.filter(() => Math.random() < 0.6).map((p) => ({ ...p, qty: 1 + Math.floor(Math.random() * 3) }));
-  return Math.random() < 0.3 ? { restored: true, lines } : { items: lines };
+  const shape = Math.random() < 0.3 ? { restored: true, lines } : { items: lines };
+  // 20 returning shoppers; ~40% check out as guests with no saved shipping.
+  const user = `shopper-${1 + Math.floor(Math.random() * 20)}`;
+  const shipping = Math.random() < 0.4 ? {} : { shipping: { express: Math.random() < 0.5 } };
+  return { ...shape, user, ...shipping };
 };
 
 let ok = 0;

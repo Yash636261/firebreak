@@ -33,12 +33,13 @@ const PLAN_SCHEMA = {
     score: { type: "number" },
     evidence: { type: "string", description: "the evidence line from the FIREBREAK PLAN" },
     mechanism: { type: "string", description: "one sentence: how this flag causes this error, from reading the code" },
+    effect: { type: "string", description: "the effect line from the FIREBREAK PLAN (what the action will do)" },
     action: { type: "string", description: "exact command from the plan, without --yes" },
     rollback: { type: "string" },
     env: { type: "string" },
     snapshot: { type: "string", description: "snapshot file path from the plan" },
   },
-  required: ["decision", "feature", "evidence", "mechanism", "action", "rollback", "env"],
+  required: ["decision", "feature", "evidence", "mechanism", "effect", "action", "rollback", "env"],
 };
 
 const EXEC_SCHEMA = {

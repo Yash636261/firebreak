@@ -9,7 +9,8 @@
 import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ago, die, parseArgs } from "./lib.mjs";
+import { readFileSync } from "node:fs";
+import { ago, die, killCmd, parseArgs } from "./lib.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const a = parseArgs(process.argv.slice(2));
@@ -33,15 +34,20 @@ if (!top || top.score < MIN_SCORE) {
   process.exit(0);
 }
 
-// Smallest blast radius: a segment-scoped change is killed for that segment only.
+// Smallest blast radius: a segment-scoped change is killed for that segment only,
+// and a running experiment goes back to control instead of being switched off.
 const seg = /segment override (\S+)/.exec(top.log ?? "")?.[1];
-const scope = `-p ${sus.projectId} -e ${sus.envKey}`;
-const action = `flagsmith flag disable ${top.feature}${seg ? ` --segment ${seg}` : ""} ${scope}`;
-
 const ctxArgs = ["project", "env"].flatMap((k) => (typeof a[k] === "string" ? [`--${k}`, a[k]] : []));
 const snapOut = node("snapshot.mjs", [top.feature, ...(seg ? ["--segment", seg] : []), ...ctxArgs]);
 const rollback = /^rollback: (.*)$/m.exec(snapOut)?.[1] ?? "(see snapshot)";
 const snapshot = /^saved (.*)$/m.exec(snapOut)?.[1] ?? null;
+const snap = JSON.parse(readFileSync(snapshot, "utf8"));
+const kill = killCmd(snap);
+const action = kill.command;
+const effect =
+  kill.kind === "experiment_to_control"
+    ? `roll the experiment back to control: everyone gets ${JSON.stringify(kill.control)}; the flag stays on`
+    : `turn ${top.feature} off${seg ? ` for segment ${seg}` : ""}`;
 
 const gapMs = new Date(sus.at) - new Date(top.changedAt);
 // Flagsmith's clock and the app's clock differ by up to a second or two, so a
@@ -57,7 +63,7 @@ const evidence = `${top.log} at ${top.changedAt.slice(11, 16)}Z by ${top.by}, ${
 const others = sus.suspects.slice(1).map((s) => `${s.feature} ${s.score}`).join(", ");
 
 if (a.json) {
-  process.stdout.write(`${JSON.stringify({ decision: "kill", feature: top.feature, score: top.score, evidence, action, rollback, snapshot, env: sus.env, others: sus.suspects.slice(1) })}\n`);
+  process.stdout.write(`${JSON.stringify({ decision: "kill", kind: kill.kind, feature: top.feature, score: top.score, evidence, effect, action, rollback, snapshot, env: sus.env, others: sus.suspects.slice(1) })}\n`);
   process.exit(0);
 }
 process.stdout.write(
@@ -65,6 +71,7 @@ process.stdout.write(
     "FIREBREAK PLAN",
     `suspect:  ${top.feature}  (score ${top.score.toFixed(2)})`,
     `evidence: ${evidence}`,
+    `effect:   ${effect}`,
     `action:   ${action}`,
     `rollback: ${rollback}`,
     `env:      ${sus.env}`,

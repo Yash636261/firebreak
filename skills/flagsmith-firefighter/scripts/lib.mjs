@@ -73,6 +73,32 @@ export function context(overrides = {}) {
   return { projectId: p.id, orgId: p.organisation, envKey: e.api_key ?? envKey, envId: e.id, envName: e.name ?? String(envKey) };
 }
 
+/** Variants of a multivariate flag that currently get traffic. */
+export const liveVariants = (state) => (state?.variants ?? []).filter((v) => Number(v.weight) > 0);
+const variantKey = (v) => v.key ?? v.id;
+
+/** The command that puts a flag back exactly as a snapshot found it (state, value, weights). */
+export function rollbackCmd({ feature, projectId, envKey, segment, state }) {
+  const parts = ["flagsmith flag update", feature, "-p", projectId, "-e", envKey];
+  if (segment) parts.push("--segment", segment);
+  parts.push(state.enabled ? "--enable" : "--disable");
+  const variants = state.variants ?? [];
+  for (const v of variants) parts.push("--weight", `${variantKey(v)}=${v.weight}`);
+  if (!variants.length && state.value != null && state.value !== "") parts.push("--value", JSON.stringify(String(state.value)));
+  return [...parts, "--yes"].join(" ");
+}
+
+/** Smallest kill: a running experiment goes back to control; anything else is disabled. */
+export function killCmd({ feature, projectId, envKey, segment, state }) {
+  const seg = segment ? ` --segment ${segment}` : "";
+  const live = state.enabled ? liveVariants(state) : [];
+  if (live.length) {
+    const weights = live.map((v) => `--weight ${variantKey(v)}=0`).join(" ");
+    return { kind: "experiment_to_control", command: `flagsmith flag update ${feature}${seg} ${weights} -p ${projectId} -e ${envKey}`, control: state.value };
+  }
+  return { kind: "disable", command: `flagsmith flag disable ${feature}${seg} -p ${projectId} -e ${envKey}` };
+}
+
 /** Flags passed to every state-changing or env-scoped CLI call. */
 export const scope = (ctx) => ["-p", String(ctx.projectId), "-e", ctx.envKey];
 

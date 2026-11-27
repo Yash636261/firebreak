@@ -13,7 +13,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<
 const STATUS = {
   investigating: ["#b58900", "Investigating…"],
   awaiting_approval: ["#d33682", "Waiting for approval"],
-  executing: ["#b58900", "Approved, executing…"],
+  executing: ["#b58900", "Approved, applying…"],
   resolved: ["#2aa198", "Resolved"],
   rejected: ["#839496", "Rejected"],
   no_flag: ["#839496", "No flag explains this"],
@@ -33,9 +33,10 @@ function card(i) {
     <dt>Suspect</dt><dd><code>${esc(p.feature || "—")}</code> ${p.score != null ? `(score ${esc(p.score)})` : ""}</dd>
     <dt>Evidence</dt><dd>${esc(p.evidence)}</dd>
     <dt>Why</dt><dd>${esc(p.mechanism)}</dd>
+    ${p.decision === "kill" && p.effect ? `<dt>Effect</dt><dd>${esc(p.effect)}</dd>` : ""}
     ${p.decision === "kill" ? `<dt>Action</dt><dd><code>${esc(p.action)}</code></dd><dt>Rollback</dt><dd><code>${esc(p.rollback)}</code></dd>` : ""}
   </dl>` : ""}
-  ${i.status === "awaiting_approval" ? `<form method="post" action="/i/${i.id}/approve" style="display:inline"><button class="go">Approve kill</button></form>
+  ${i.status === "awaiting_approval" ? `<form method="post" action="/i/${i.id}/approve" style="display:inline"><button class="go">Approve${/--weight/.test(i.plan?.action ?? "") ? " rollback to control" : " kill"}</button></form>
   <form method="post" action="/i/${i.id}/reject" style="display:inline"><button>Reject</button></form>` : ""}
   ${r ? `<pre>${esc(r.summary)}${r.verify_line ? `\n${esc(r.verify_line)}` : ""}</pre>` : ""}
   ${i.error ? `<pre class="err">${esc(i.error)}</pre>` : ""}

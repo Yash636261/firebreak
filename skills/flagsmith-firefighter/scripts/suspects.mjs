@@ -72,7 +72,10 @@ if (byFeature.size === 0) {
     if (t < from || t > until) continue;
     const f = names.get(fs.feature);
     if (!f) continue;
-    const what = `${fs.feature_segment ? `segment override ${fs.feature_segment}` : "environment default"} now ${fs.enabled ? "ON" : "off"}`;
+    const mvPct = (fs.multivariate_feature_state_values ?? []).reduce((n, v) => n + Number(v.percentage_allocation ?? 0), 0);
+    const what = `${fs.feature_segment ? `segment override ${fs.feature_segment}` : "environment default"} now ${fs.enabled ? "ON" : "off"}${
+      fs.enabled && mvPct > 0 ? `, experiment sending ${mvPct}% of users to variants` : ""
+    }`;
     const cur = byFeature.get(f) ?? { feature: f, featureId: fs.feature, changes: 0, last: null };
     cur.changes++;
     if (!cur.last || t > cur.last.t) cur.last = { t, log: what, by: null };
