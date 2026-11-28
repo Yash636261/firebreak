@@ -6,6 +6,10 @@
 
 Built for *Toggle Wars*, the Flagsmith hackathon · **Track 02** (AI Agents and Feature Flags) · **Track 04** (Flagsmith Agent Skills)
 
+**▶ [Demo video (2:44)](https://youtu.be/XOT2aATlkdI)** · **[Project site with an interactive replay](https://firebreak-site-eight.vercel.app)**
+
+[![Firebreak demo video](https://img.youtube.com/vi/XOT2aATlkdI/maxresdefault.jpg)](https://youtu.be/XOT2aATlkdI)
+
 ---
 
 ## The problem
